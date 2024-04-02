@@ -14,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
+lib/
 parts/
 sdist/
 var/
@@ -127,6 +127,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+previous_iterations/
+test*
 
 # Spyder project settings
 .spyderproject
