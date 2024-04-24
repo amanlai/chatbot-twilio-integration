@@ -13,7 +13,7 @@ mongo_uri = getenv("MONGO_URI")
 persist_directory = getenv("PERSIST_DIRECTORY", "db")
 
 
-async def init_connection():
+def init_connection():
     try:
         client = MongoClient(
             mongo_uri,
@@ -27,7 +27,7 @@ async def init_connection():
     return client
 
 
-async def copy_from_collection(collection):
+def copy_from_collection(collection):
     # get list of attributes from MongoDB
     index_files, system_message, temperature = [
         next(collection.find({key: {"$exists": True}}), {}).get(key) 
@@ -40,14 +40,18 @@ async def copy_from_collection(collection):
         zip_file.extractall(persist_directory)
     # now that we have the index files stored in persist directory
     # we can get the vector stores from them
-    vector_store = FAISS.load_local(persist_directory, OpenAIEmbeddings())
+    vector_store = FAISS.load_local(
+        persist_directory, 
+        OpenAIEmbeddings(), 
+        allow_dangerous_deserialization=True
+    )
     return vector_store, system_message, temperature
 
 
-async def get_agent_executor(collection):
+def get_agent_executor(collection):
     """
     A convenience function that copies data from collection and
     builds the agent executor from them and returns it
     """
-    vs, sys_msg, temp = await copy_from_collection(collection)
-    return await executor(vs, sys_msg, temp)
+    vs, sys_msg, temp = copy_from_collection(collection)
+    return executor(vs, sys_msg, temp)

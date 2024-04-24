@@ -1,7 +1,7 @@
 from datetime import datetime
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-async def get_prompt(system_message):
+def get_prompt(system_message):
 
     sys_msg = f"""You are a helpful assistant. Respond to the user as helpfully and accurately as possible.
 
@@ -39,8 +39,8 @@ async def get_prompt(system_message):
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", sys_msg),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("user", "{input}"),
+            MessagesPlaceholder(variable_name="chat_history", optional=True),
+            ("human", "{input}"),
             MessagesPlaceholder(variable_name="agent_scratchpad"),
         ]
     )
