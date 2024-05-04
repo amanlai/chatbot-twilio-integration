@@ -67,6 +67,7 @@ instance/
 
 # debug mode stuff:
 db/
+test.py
 
 # Scrapy stuff:
 .scrapy

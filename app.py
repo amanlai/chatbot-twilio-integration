@@ -1,8 +1,7 @@
 from os import getenv
-from re import sub
 from dotenv import load_dotenv
-# from langchain_core.messages import AIMessage, HumanMessage
-from langchain_mongodb.chat_message_histories import MongoDBChatMessageHistory
+from langchain_mongodb import MongoDBChatMessageHistory
+from langchain_core.messages import AIMessage, HumanMessage
 from chainlit.server import app
 # import chainlit as cl
 from chainlit.context import init_http_context
@@ -12,27 +11,22 @@ from twilio.http.async_http_client import AsyncTwilioHttpClient
 from utils.helpers import init_connection, get_agent_executor
 load_dotenv()
 
-# port = int(getenv("PORT", 8000))
-database_name = getenv("DB_NAME", "chattabot")
-business_name = getenv("BUSINESS_NAME")
 chat_history_db = getenv("CHAT_HISTORY_DB", "chat_history")
 account_sid = getenv("TWILIO_ACCOUNT_SID")
 auth_token = getenv("TWILIO_AUTH_TOKEN")
 from_phone = getenv("TWILIO_PHONE")
 mongo_uri = getenv("MONGO_URI")
+debug = getenv("DEBUG", 'False') == 'True'
+async_mode_on = getenv("ASYNC_MODE_ON", 'True') == 'True'
 
 
-async def create_answer(agent_executor, question, phone_number):
+async def create_answer(question, phone_number):
     """
     Create an answer given 
-      - langchain agent executor
       - previous chat history 
       - a new question
     """
-    # ch = [
-    #     HumanMessage(content=x) if i % 2 == 0 else AIMessage(content=x)
-    #     for i, x in enumerate(chat_history)
-    # ]
+    # instantiate chat history instance
     ch = MongoDBChatMessageHistory(
         session_id=phone_number,
         connection_string=mongo_uri,
@@ -40,70 +34,78 @@ async def create_answer(agent_executor, question, phone_number):
         collection_name=phone_number,
     )
 
-    result = await agent_executor.ainvoke(
-        {"input": question, "chat_history": ch.messages}
-    )
-    answer = result["output"]
-    answer = sub("^System: ", "", sub("^\\??\n\n", "", answer))
+    if question == "Delete chat history.":
+        ch.clear()
+        return "Chat history deleted."
 
+    # construct the agent and generate answer
+    with init_connection() as conn:
+        agent_executor = get_agent_executor(conn)
+        result = await agent_executor.ainvoke(
+            {"input": question, "chat_history": ch.messages}
+        )
+        if debug:
+            print(f"result: {result}")
+        answer = result["output"]
+    
     # add the most recent message exchange to db
-    ch.add_user_message(question)
-    ch.add_ai_message(answer)
+    await ch.aadd_messages(
+        [HumanMessage(content=question), AIMessage(content=answer)]
+    )
+    
+    # close chat history db connection
+    ch.client.close()
     return answer
 
 
-async def send_sms(message, to_phone_number):
+async def send_sms(msg, to_phone_number):
     """ Send SMS text message and return the message id """
+    
     http_client = AsyncTwilioHttpClient()
-    client = Client(account_sid, auth_token, http_client=http_client)
+    client = Client(
+        username=account_sid, 
+        password=auth_token, 
+        http_client=http_client
+    )
     message = await client.messages.create_async(
-        body=message,
+    # message = client.messages.create(
+        body=msg,
         from_=from_phone,
         to=to_phone_number
     )
+    await http_client.close()
+
     return message.status, message.sid
 
 
 @app.post("/sms")
 async def chat(request: Request):
     """Respond to incoming calls with a simple text message."""
-    # set http context
-    init_http_context()
     # receive question in SMS
     fm = await request.form()
     to_phone_number = fm.get("From")
     question = fm.get("Body")
 
-    conn = init_connection()
-    # get agent executor
-    db = conn[database_name]
-    collection = db[business_name]
-    agent_executor = get_agent_executor(collection)
-    conn.close()
+    if debug:
+        print(f"This is the question (from {to_phone_number}): {question}.\n\n")
 
-    # get chat history
-    # db_chat_history = conn[chat_history_db]
-    # coll_chat_history = db_chat_history[to_phone_number]
-    # chat_history_data = next(coll_chat_history.find({}), {"history": []})
-    # chat_history = chat_history_data["history"]
+    # set http context
+    init_http_context(user=to_phone_number)
+
     # get answers
-    answer = await create_answer(agent_executor, question, to_phone_number)
-
+    answer = await create_answer(question, to_phone_number)
     # send SMS back
     mstatus, msid = await send_sms(answer, to_phone_number)
 
-    # update the chat history of this phone number
-    # chat_history.extend((question, answer))
-    # coll_chat_history.delete_many({})
-    # coll_chat_history.insert_one({"history": chat_history})
-    # conn.close()
+    if debug:
+        print(f"\nThis is the generated answer:\n{answer}\n\n")
+        print(f"Message status: {mstatus}; message SID: {msid}\n")
 
-    print(f"Message status: {mstatus}; message SID: {msid}\n")
     return {"answer": answer, "question": question}
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=debug)
 
 
 # # App Hooks
